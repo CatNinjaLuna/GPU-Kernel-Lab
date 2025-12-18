@@ -4,6 +4,7 @@ add_library(kernels STATIC
     gemm.cu
     softmax.cu
     conv2d.cu
+    reduction.cu
 )
 
 target_link_libraries(kernels CUDA::cudart)

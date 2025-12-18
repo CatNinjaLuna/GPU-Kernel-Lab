@@ -11,7 +11,8 @@ This lab implements and benchmarks several fundamental GPU kernels:
 
 -  **Vector Addition (vec_add)** – baseline for memory coalescing and grid-stride loops
 -  **Tiled Matrix Multiplication (GEMM)** – explores shared memory, tiling strategies, and performance scaling
--  **Softmax** – demonstrates warp-level reductions and numerical stability
+-  **Parallel Reduction** – demonstrates atomic operations, shared memory reduction, and warp shuffle optimizations
+-  **Softmax** – demonstrates block-level reductions and numerical stability
 -  **Convolution (conv2d)** – applies tiling and data reuse for 2D image processing
 
 Each kernel is validated against a CPU reference implementation and profiled using **NVIDIA Nsight Compute**.
@@ -25,7 +26,8 @@ Each kernel is validated against a CPU reference implementation and profiled usi
 -  **Performance benchmarking** with timing and throughput metrics
 -  **Optimized implementations**:
    -  Grid-stride loops for vector operations
-   -  Shared memory tiling for matrix multiplication
+   -  Progressive reduction optimizations (atomic → shared memory → warp shuffle)
+   -  Blocked memory tiling for matrix multiplication
    -  Warp-level reductions for softmax
    -  Tiled convolution with halo loading
 -  **Python environment** ready for analysis and visualization
@@ -88,12 +90,14 @@ make -j
 ```bash
 # From build directory
 .\tests\test_vec_add.exe      # Windows
-.\tests\test_gemm.exe
+.\tests\test_reduction.exe    # NEW: Compare 3 reduction variants
 .\tests\test_softmax.exe
 .\tests\test_conv2d.exe
 
 # On Linux
 ./tests/test_vec_add
+./tests/test_gemm
+./tests/test_reductionadd
 ./tests/test_gemm
 ./tests/test_softmax
 ./tests/test_conv2d
