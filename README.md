@@ -107,6 +107,37 @@ Each test outputs:
 -  Performance metrics (GFLOP/s or GB/s)
 -  Validation status (PASSED/FAILED)
 
+### 5. Run Benchmarks and Generate Analysis
+
+```bash
+# Run comprehensive benchmarks across multiple sizes
+### Vector Addition
+
+| Size (M) | Time (ms) | Bandwidth (GB/s) | Status |
+|----------|-----------|------------------|--------|
+| 1.0      | 0.335     | 35.86            | PASSED |
+| 5.0      | 0.467     | 128.38           | PASSED |
+| 10.0     | 0.680     | 176.39           | PASSED |
+| 20.0     | 0.749     | 320.28           | PASSED |
+| 50.0     | 1.321     | 454.06           | PASSED |
+
+### Matrix Multiplication (GEMM - Tiled)
+
+| Size      | Time (ms) | Performance (GFLOP/s) | Status |
+|-----------|-----------|----------------------|--------|
+| 256×256   | 0.413     | 81.28                | PASSED |
+| 512×512   | 0.486     | 552.86               | PASSED |
+| 1024×1024 | 0.974     | 2205.93              | PASSED |
+| 2048×2048 | 4.686     | 3666.25              | PASSED |
+| 4096×4096 | 37.243    | 3690.29              | PASSED
+
+# View generated plots and summary
+# - vec_add_performance.png: Bandwidth and timing charts
+# - gemm_performance.png: GFLOP/s and timing charts
+# - gemm_scaling.png: Performance scaling analysis
+# - summary.md: Performance summary table
+```
+
 ---
 
 ## Example Output
@@ -116,17 +147,39 @@ Each test outputs:
 | vec_add    | 10M  | 750              | 82%       | 90%       | Memory-bound      |
 | tiled_gemm | 4096 | 5200             | 65%       | 70%       | Tile size 128×128 |
 
-Current Status
+Performance Analysis Tools
 
-✅ **Implemented:**
+The project includes Python scripts for comprehensive performance analysis:
 
--  Vector addition with grid-stride loops
--  Matrix multiplication (naive and tiled with shared memory)
--  Softmax with warp-level reductions
--  2D Convolution with tiled loading
+**Automated Benchmarking:**
 
-✅ **Validated:**
+-  `scripts/run_benchmarks.py` - Runs tests with multiple problem sizes
+-  Automatically saves results to CSV with timestamps
+-  Tests vector addition (1M to 50M elements) and GEMM (256×256 to 4096×4096)
 
+**Visualization:**
+
+-  `python/plot_performance.py` - Generates performance charts
+   -  Bandwidth vs problem size for vector operations
+   -  GFLOP/s vs matrix size for GEMM
+   -  Performance scaling analysis
+   -  Markdown summary tables
+
+**Analysis:**
+
+-  `python/compare_gemm.py` - Compare naive vs tiled implementations
+-  Speedup calculations and visualizations
+
+## Next Steps
+
+-  ✅ ~~Create Python scripts for performance visualization~~
+-  Add naive GEMM implementation for comparison
+-  Parameter sweep automation (tile sizes, block sizes)
+-  Integrate Nsight Compute for advanced profiling
+-  Benchmark against cuBLAS/cuDNN baselines
+-  Add PyTorch custom ops for GEMM benchmarking
+-  Extend to WMMA/Tensor Core kernels (FP16/FP8)
+-  Integrate Triton versions for ergonomic comparison
 -  All kernels pass correctness tests against CPU reference
 -  Performance benchmarks show expected speedups
 
