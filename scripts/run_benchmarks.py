@@ -41,15 +41,59 @@ def parse_vec_add_output(output):
 
 def parse_gemm_output(output):
     """Parse GEMM test output."""
-    time_match = re.search(r'GPU Time:\s+([\d.]+)\s+ms', output)
-    gflops_match = re.search(r'Performance:\s+([\d.]+)\s+GFLOP/s', output)
-    status_match = re.search(r'Result:\s+(\w+)', output)
+    results = []
     
-    return {
-        'time_ms': float(time_match.group(1)) if time_match else None,
-        'gflops': float(gflops_match.group(1)) if gflops_match else None,
-        'status': status_match.group(1) if status_match else None
-    }
+    # Parse naive GEMM
+    naive_section = re.search(r'Naive GEMM:(.*?)(?=Tiled GEMM:|$)', output, re.DOTALL)
+    if naive_section:
+        naive_text = naive_section.group(1)
+        time_match = re.search(r'GPU Time:\s+([\d.]+)\s+ms', naive_text)
+        gflops_match = re.search(r'Performance:\s+([\d.]+)\s+GFLOP/s', naive_text)
+        status_match = re.search(r'Result:\s+(\w+)', naive_text)
+        results.append({
+            'variant': 'naive',
+            'time_ms': float(time_match.group(1)) if time_match else None,
+            'gflops': float(gflops_match.group(1)) if gflops_match else None,
+            'status': status_match.group(1) if status_match else None
+        })
+    
+    # Parse tiled GEMM
+    tiled_section = re.search(r'Tiled GEMM:(.*?)(?=Speedup:|$)', output, re.DOTALL)
+    if tiled_section:
+        tiled_text = tiled_section.group(1)
+        time_match = re.search(r'GPU Time:\s+([\d.]+)\s+ms', tiled_text)
+        gflops_match = re.search(r'Performance:\s+([\d.]+)\s+GFLOP/s', tiled_text)
+        status_match = re.search(r'Result:\s+(\w+)', tiled_text)
+        results.append({
+            'variant': 'tiled',
+            'time_ms': float(time_match.group(1)) if time_match else None,
+            'gflops': float(gflops_match.group(1)) if gflops_match else None,
+            'status': status_match.group(1) if status_match else None
+        })
+    
+    return results
+
+
+def parse_reduction_output(output):
+    """Parse reduction test output."""
+    results = []
+    
+    variants = ['Atomic', 'Shared Memory', 'Warp Shuffle']
+    for variant in variants:
+        section = re.search(rf'{variant}.*?:(.*?)(?=(?:Atomic|Shared Memory|Warp Shuffle|===))', output, re.DOTALL)
+        if section:
+            text = section.group(1)
+            time_match = re.search(r'Time:\s+([\d.]+)\s+ms', text)
+            bandwidth_match = re.search(r'Bandwidth:\s+([\d.]+)\s+GB/s', text)
+            status_match = re.search(r'Status:\s+(\w+)', text)
+            results.append({
+                'variant': variant.lower().replace(' ', '_'),
+                'time_ms': float(time_match.group(1)) if time_match else None,
+                'bandwidth_gbs': float(bandwidth_match.group(1)) if bandwidth_match else None,
+                'status': status_match.group(1) if status_match else None
+            })
+    
+    return results
 
 
 def benchmark_vec_add(build_dir, output_dir):
@@ -90,20 +134,46 @@ def benchmark_gemm(build_dir, output_dir):
     if not test_exe.exists():
         test_exe = build_dir / 'tests' / 'test_gemm'
     
-    print("Benchmarking GEMM (Tiled)...")
+    print("Benchmarking GEMM (Naive & Tiled)...")
     for size in sizes:
         print(f"  Size: {size}x{size}")
         output = run_test(str(test_exe), [str(size)])
         if output:
-            data = parse_gemm_output(output)
-            data['size'] = size
-            data['variant'] = 'tiled'
-            results.append(data)
+            variants_data = parse_gemm_output(output)
+            for data in variants_data:
+                data['size'] = size
+                results.append(data)
     
     # Save to CSV
     csv_file = output_dir / 'gemm_results.csv'
     with open(csv_file, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=['size', 'variant', 'time_ms', 'gflops', 'status'])
+        writer.writeheader()
+        writer.writerows(results)
+    
+    print(f"  Results saved to {csv_file}")
+    return results
+
+
+def benchmark_reduction(build_dir, output_dir):
+    """Benchmark reduction with default size."""
+    test_exe = build_dir / 'tests' / 'test_reduction.exe'
+    if not test_exe.exists():
+        test_exe = build_dir / 'tests' / 'test_reduction'
+    
+    print("Benchmarking Reduction (10M elements)...")
+    output = run_test(str(test_exe))
+    results = []
+    
+    if output:
+        results = parse_reduction_output(output)
+        for data in results:
+            data['size'] = 10000000
+    
+    # Save to CSV
+    csv_file = output_dir / 'reduction_results.csv'
+    with open(csv_file, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=['size', 'variant', 'time_ms', 'bandwidth_gbs', 'status'])
         writer.writeheader()
         writer.writerows(results)
     
@@ -131,6 +201,8 @@ def main():
     vec_add_results = benchmark_vec_add(build_dir, output_dir)
     print()
     gemm_results = benchmark_gemm(build_dir, output_dir)
+    print()
+    reduction_results = benchmark_reduction(build_dir, output_dir)
     
     print()
     print(f"Benchmarking complete!")

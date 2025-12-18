@@ -50,18 +50,19 @@ int main(int argc, char** argv) {
     cudaMemcpy(d_A, h_A, M * K * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_B, h_B, K * N * sizeof(float), cudaMemcpyHostToDevice);
     
-    // Test tiled version
+    // Test naive version
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     
+    printf("\nNaive GEMM:\n");
     cudaEventRecord(start);
-    gemm_tiled_gpu(d_A, d_B, d_C, M, N, K);
+    gemm_naive_gpu(d_A, d_B, d_C, M, N, K);
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
     
-    float gpu_time;
-    cudaEventElapsedTime(&gpu_time, start, stop);
+    float naive_time;
+    cudaEventElapsedTime(&naive_time, start, stop);
     
     // Copy result back
     cudaMemcpy(h_C_gpu, d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost);
@@ -70,13 +71,39 @@ int main(int argc, char** argv) {
     gemm_cpu(h_A, h_B, h_C_cpu, M, N, K);
     
     // Verify results
-    bool correct = verify_results(h_C_gpu, h_C_cpu, M * N);
+    bool naive_correct = verify_results(h_C_gpu, h_C_cpu, M * N);
     
-    float gflops = (2.0f * M * N * K) / (gpu_time * 1e6);
+    float naive_gflops = (2.0f * M * N * K) / (naive_time * 1e6);
     
-    printf("GPU Time: %.3f ms\n", gpu_time);
-    printf("Performance: %.2f GFLOP/s\n", gflops);
-    printf("Result: %s\n", correct ? "PASSED" : "FAILED");
+    printf("  GPU Time: %.3f ms\n", naive_time);
+    printf("  Performance: %.2f GFLOP/s\n", naive_gflops);
+    printf("  Result: %s\n", naive_correct ? "PASSED" : "FAILED");
+    
+    // Test tiled version
+    printf("\nTiled GEMM:\n");
+    cudaEventRecord(start);
+    gemm_tiled_gpu(d_A, d_B, d_C, M, N, K);
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    
+    float tiled_time;
+    cudaEventElapsedTime(&tiled_time, start, stop);
+    
+    // Copy result back
+    cudaMemcpy(h_C_gpu, d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost);
+    
+    // Verify results
+    bool tiled_correct = verify_results(h_C_gpu, h_C_cpu, M * N);
+    
+    float tiled_gflops = (2.0f * M * N * K) / (tiled_time * 1e6);
+    
+    printf("  GPU Time: %.3f ms\n", tiled_time);
+    printf("  Performance: %.2f GFLOP/s\n", tiled_gflops);
+    printf("  Result: %s\n", tiled_correct ? "PASSED" : "FAILED");
+    
+    printf("\nSpeedup: %.2fx\n", naive_time / tiled_time);
+    
+    bool correct = naive_correct && tiled_correct;
     
     // Cleanup
     delete[] h_A;
