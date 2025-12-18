@@ -16,3 +16,6 @@ target_link_libraries(test_reduction kernels CUDA::cudart)
 
 add_executable(test_gemm_fp16 test_gemm_fp16.cu)
 target_link_libraries(test_gemm_fp16 kernels CUDA::cudart)
+
+add_executable(test_gemm_wmma test_gemm_wmma.cu)
+target_link_libraries(test_gemm_wmma kernels CUDA::cudart)
