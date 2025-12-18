@@ -120,10 +120,41 @@ Each test outputs:
 
 ```bash
 # Run comprehensive benchmarks across multiple sizes
+```
+
+---
+
+## Benchmark Results Summary
+
+**Comprehensive Performance Comparison Table:**
+
+| Kernel         | Size | Implementation | Time (ms) | Performance      | Speedup    | Key Insight                |
+| -------------- | ---- | -------------- | --------- | ---------------- | ---------- | -------------------------- |
+| **Vector Add** | 50M  | Grid-stride    | 1.32      | 454 GB/s         | -          | Memory-bound baseline      |
+| **Reduction**  | 10M  | Atomic         | 13.27     | 3.01 GB/s        | 1×         | Global contention          |
+| **Reduction**  | 10M  | Shared Memory  | 0.11      | 380 GB/s         | **126×**   | Tree reduction wins        |
+| **Reduction**  | 10M  | Warp Shuffle   | 0.06      | 624 GB/s         | **207×**   | Lock-free warp primitives  |
+| **GEMM**       | 1024 | FP32 Naive     | 1.20      | 1784 GFLOP/s     | 1×         | Baseline compute           |
+| **GEMM**       | 1024 | FP32 Tiled     | 0.68      | 3168 GFLOP/s     | 1.78×      | Shared memory reuse        |
+| **GEMM**       | 1024 | FP16 Tiled     | 0.72      | 3003 GFLOP/s     | 1.82×      | Memory footprint reduction |
+| **GEMM**       | 4096 | FP32 Tiled     | 266.22    | 516 GFLOP/s      | 1×         | Large matrix baseline      |
+| **GEMM**       | 4096 | FP16 Tiled     | 54.81     | 2508 GFLOP/s     | 4.86×      | 2× bandwidth advantage     |
+| **GEMM**       | 4096 | FP16 WMMA (TC) | 26.08     | **5270 GFLOP/s** | **10.21×** | Tensor Core acceleration   |
+
+**🔑 Key Takeaways for Interviews:**
+
+1. **Memory Hierarchy Matters**: Reduction speedup (207×) shows atomic → shared mem → warp primitives progression
+2. **Optimization Trade-offs**: Tiled GEMM faster at 1024 (1.78×) but _slower_ at 4096+ due to occupancy/register pressure
+3. **Hardware Acceleration**: Tensor Cores provide 10× speedup - production-critical for DL inference
+4. **Precision vs Performance**: FP16 gives 4.86× speedup from bandwidth, but needs Tensor Cores for full benefit
+5. **Size-Dependent Behavior**: Optimal strategy changes with problem size (tiling helps small, hurts large matrices)
+
+---
+
 ### Vector Addition
 
 | Size (M) | Time (ms) | Bandwidth (GB/s) | Status |
-|----------|-----------|------------------|--------|
+| -------- | --------- | ---------------- | ------ |
 | 1.0      | 0.335     | 35.86            | PASSED |
 | 5.0      | 0.467     | 128.38           | PASSED |
 | 10.0     | 0.680     | 176.39           | PASSED |
@@ -135,7 +166,7 @@ Each test outputs:
 **Naive vs Tiled Performance Comparison:**
 
 | Size      | Naive (ms) | Naive (GFLOP/s) | Tiled (ms) | Tiled (GFLOP/s) | Speedup | Status |
-|-----------|------------|-----------------|------------|-----------------|---------|--------|
+| --------- | ---------- | --------------- | ---------- | --------------- | ------- | ------ |
 | 256×256   | 0.459      | 73.06           | 0.118      | 283.86          | 3.89×   | PASSED |
 | 512×512   | 0.485      | 553.45          | 0.287      | 934.14          | 1.69×   | PASSED |
 | 1024×1024 | 1.204      | 1783.96         | 0.678      | 3167.75         | 1.78×   | PASSED |
@@ -143,58 +174,64 @@ Each test outputs:
 | 4096×4096 | 53.885     | 2550.62         | 157.584    | 872.16          | 0.34×   | PASSED |
 
 **Analysis:**
-- **Small matrices (256×256)**: Tiled version achieves 3.89× speedup - shared memory optimization dominates
-- **Medium matrices (512-1024)**: Consistent 1.7-1.8× speedup as expected from memory reuse
-- **Large matrices (2048+)**: *Tiled version actually performs WORSE* ⚠️
+
+-  **Small matrices (256×256)**: Tiled version achieves 3.89× speedup - shared memory optimization dominates
+-  **Medium matrices (512-1024)**: Consistent 1.7-1.8× speedup as expected from memory reuse
+-  **Large matrices (2048+)**: _Tiled version actually performs WORSE_ ⚠️
 
 **Why Tiling Fails on Large Matrices** (Critical Interview Topic):
 
 1. **Register Pressure**:
-   - Each thread maintains partial sum + tile indices + loop counters
-   - 16×16 tile requires each thread to accumulate across K/16 iterations
-   - High register usage → SM launches fewer blocks → **reduced occupancy**
-   - Lower occupancy → fewer warps to hide memory latency → stalls increase
+
+   -  Each thread maintains partial sum + tile indices + loop counters
+   -  16×16 tile requires each thread to accumulate across K/16 iterations
+   -  High register usage → SM launches fewer blocks → **reduced occupancy**
+   -  Lower occupancy → fewer warps to hide memory latency → stalls increase
 
 2. **Shared Memory Bank Conflicts**:
-   - 16×16 float tiles = 1KB per tile × 2 tiles (A & B) = 2KB per block
-   - As K increases, more synchronization points between tile loads
-   - Row/column access patterns can cause 16-way bank conflicts
-   - Bank conflicts serialize accesses → **shared memory becomes bottleneck**
+
+   -  16×16 float tiles = 1KB per tile × 2 tiles (A & B) = 2KB per block
+   -  As K increases, more synchronization points between tile loads
+   -  Row/column access patterns can cause 16-way bank conflicts
+   -  Bank conflicts serialize accesses → **shared memory becomes bottleneck**
 
 3. **L2 Cache Effects**:
-   - Naive implementation: simple strided access patterns
-   - Modern GPUs have large L2 caches (6MB+ on Ampere/Ada)
-   - At 2048×2048, data reuse happens naturally in L2 without explicit tiling
-   - Naive kernel's simpler memory pattern → **better cache hit rate**
+
+   -  Naive implementation: simple strided access patterns
+   -  Modern GPUs have large L2 caches (6MB+ on Ampere/Ada)
+   -  At 2048×2048, data reuse happens naturally in L2 without explicit tiling
+   -  Naive kernel's simpler memory pattern → **better cache hit rate**
 
 4. **Synchronization Overhead**:
-   - Tiled kernel requires `__syncthreads()` after each tile load
-   - Large matrices → more tiles → more synchronization barriers
-   - Synchronization cost becomes non-trivial proportion of compute time
+   -  Tiled kernel requires `__syncthreads()` after each tile load
+   -  Large matrices → more tiles → more synchronization barriers
+   -  Synchronization cost becomes non-trivial proportion of compute time
 
 **Interview Gold**: This demonstrates understanding that:
-- ✅ Optimizations have break-even points based on problem size
-- ✅ Resource constraints (registers, shared mem) limit scalability
-- ✅ Hardware evolves (larger caches change optimal strategies)
-- ✅ Production code needs adaptive algorithms, not fixed optimizations
-- ✅ **Knowing when NOT to optimize is as valuable as knowing how**
+
+-  ✅ Optimizations have break-even points based on problem size
+-  ✅ Resource constraints (registers, shared mem) limit scalability
+-  ✅ Hardware evolves (larger caches change optimal strategies)
+-  ✅ Production code needs adaptive algorithms, not fixed optimizations
+-  ✅ **Knowing when NOT to optimize is as valuable as knowing how**
 
 **Key Insights for Interviews:**
-- **Naive implementation**: O(K) global memory accesses per output element
-- **Tiled implementation**: O(K/TILE_SIZE) global memory accesses with shared memory reuse
-- **The Paradox**: Reducing memory traffic doesn't guarantee speedup if you sacrifice occupancy
-- **Real-world solution**: cuBLAS uses multiple kernels with different tile sizes (8×8, 16×16, 32×32, 64×64) selected based on matrix dimensions and GPU architecture
+
+-  **Naive implementation**: O(K) global memory accesses per output element
+-  **Tiled implementation**: O(K/TILE_SIZE) global memory accesses with shared memory reuse
+-  **The Paradox**: Reducing memory traffic doesn't guarantee speedup if you sacrifice occupancy
+-  **Real-world solution**: cuBLAS uses multiple kernels with different tile sizes (8×8, 16×16, 32×32, 64×64) selected based on matrix dimensions and GPU architecture
 
 ### Mixed Precision GEMM (FP16 vs FP32) - TensorRT Focus
 
 **1024×1024 Matrix Comparison:**
 
 | Precision | Variant | Time (ms) | Performance (GFLOP/s) | Speedup | Status |
-|-----------|---------|-----------|----------------------|---------|--------|
-| FP32      | Naive   | 1.304     | 1646.40              | 1.00×   | PASSED |
-| FP32      | Tiled   | 0.546     | 3935.54              | 2.39×   | PASSED |
-| FP16      | Naive   | 30.159    | 71.21                | 0.04×   | PASSED |
-| FP16      | Tiled   | 0.715     | 3002.77              | 1.82×   | PASSED |
+| --------- | ------- | --------- | --------------------- | ------- | ------ |
+| FP32      | Naive   | 1.304     | 1646.40               | 1.00×   | PASSED |
+| FP32      | Tiled   | 0.546     | 3935.54               | 2.39×   | PASSED |
+| FP16      | Naive   | 30.159    | 71.21                 | 0.04×   | PASSED |
+| FP16      | Tiled   | 0.715     | 3002.77               | 1.82×   | PASSED |
 
 **TensorRT Analysis - Why FP16 Matters:**
 
@@ -205,26 +242,28 @@ Each test outputs:
 5. **Batch Size**: Enables 2× larger batch sizes within same GPU memory budget
 
 **Why FP16 Naive is Slower Here:**
-- Conversion overhead: `__half2float()` and `__float2half()` in inner loop
-- No Tensor Core usage (requires WMMA/MMA APIs)
-- This kernel demonstrates **precision trade-offs**, not Tensor Core speedup
-- Real TensorRT uses Tensor Cores for 8-20× FP16 speedup over FP32
+
+-  Conversion overhead: `__half2float()` and `__float2half()` in inner loop
+-  No Tensor Core usage (requires WMMA/MMA APIs)
+-  This kernel demonstrates **precision trade-offs**, not Tensor Core speedup
+-  Real TensorRT uses Tensor Cores for 8-20× FP16 speedup over FP32
 
 **TensorRT Interview Insight:**
-- FP16 benefit is **memory + Tensor Cores**, not just arithmetic
-- Must weigh accuracy loss vs inference throughput
-- Production TensorRT: FP16 for most layers, FP32 for sensitive ops (loss, normalization)
-- Quantization awareness: FP16 → INT8 pipeline for maximum performance
+
+-  FP16 benefit is **memory + Tensor Cores**, not just arithmetic
+-  Must weigh accuracy loss vs inference throughput
+-  Production TensorRT: FP16 for most layers, FP32 for sensitive ops (loss, normalization)
+-  Quantization awareness: FP16 → INT8 pipeline for maximum performance
 
 ### Tensor Core WMMA (4096×4096 Matrix) - Production TensorRT
 
 **Hardware Acceleration Comparison:**
 
-| Implementation | Time (ms) | Performance (GFLOP/s) | Speedup | Hardware | Status |
-|----------------|-----------|----------------------|---------|----------|--------|
-| FP32 Tiled     | 266.219   | 516.26               | 1.00×   | CUDA Cores | PASSED |
-| FP16 Tiled     | 54.810    | 2507.55              | 4.86×   | CUDA Cores | PASSED |
-| FP16 WMMA (TC) | 26.079    | 5270.17              | 10.21×  | **Tensor Cores** | PASSED |
+| Implementation | Time (ms) | Performance (GFLOP/s) | Speedup | Hardware         | Status |
+| -------------- | --------- | --------------------- | ------- | ---------------- | ------ |
+| FP32 Tiled     | 266.219   | 516.26                | 1.00×   | CUDA Cores       | PASSED |
+| FP16 Tiled     | 54.810    | 2507.55               | 4.86×   | CUDA Cores       | PASSED |
+| FP16 WMMA (TC) | 26.079    | 5270.17               | 10.21×  | **Tensor Cores** | PASSED |
 
 **Critical TensorRT Insights:**
 
@@ -235,36 +274,44 @@ Each test outputs:
 5. **Memory**: FP16 inputs + FP32 accumulation balances accuracy and speed
 
 **Why This Matters for TensorRT:**
-- Modern GPUs have 100s of Tensor Cores (Ampere: 328 TCs, Ada: 512 TCs)
-- DL inference is 90% GEMM operations (FC layers, attention, convolutions as im2col+GEMM)
-- **10× speedup translates to 10× throughput** or 90% cost reduction
-- Enables real-time inference for vision models, transformers, LLMs
+
+-  Modern GPUs have 100s of Tensor Cores (Ampere: 328 TCs, Ada: 512 TCs)
+-  DL inference is 90% GEMM operations (FC layers, attention, convolutions as im2col+GEMM)
+-  **10× speedup translates to 10× throughput** or 90% cost reduction
+-  Enables real-time inference for vision models, transformers, LLMs
 
 **Production Considerations:**
-- cuBLAS/cuDNN use highly optimized TC kernels (20-30× FP32)
-- TensorRT automatically uses TCs for FP16 operations on supported layers
-- This implementation demonstrates fundamentals; production uses complex tiling strategies
-- INT8 Tensor Cores (not shown) provide additional 2× speedup for quantized models
+
+-  cuBLAS/cuDNN use highly optimized TC kernels (20-30× FP32)
+-  TensorRT automatically uses TCs for FP16 operations on supported layers
+-  This implementation demonstrates fundamentals; production uses complex tiling strategies
+-  INT8 Tensor Cores (not shown) provide additional 2× speedup for quantized models
 
 ### Parallel Reduction (10M elements)
 
 | Variant       | Time (ms) | Bandwidth (GB/s) | Speedup | Status |
-|---------------|-----------|------------------|---------|--------|
+| ------------- | --------- | ---------------- | ------- | ------ |
 | Atomic        | 13.274    | 3.01             | 1×      | PASSED |
 | Shared Memory | 0.105     | 379.56           | 126×    | PASSED |
 | Warp Shuffle  | 0.064     | 623.60           | 207×    | PASSED |
 
 **Analysis:**
-- **Atomic baseline**: Global memory contention limits performance to 3 GB/s
-- **Shared memory**: Tree reduction eliminates atomic contention → 126× speedup
-- **Warp shuffle**: Lock-free warp-level primitives avoid shared memory entirely → 207× speedup
-- **Interview insight**: This progression demonstrates the GPU memory hierarchy in action
+
+-  **Atomic baseline**: Global memory contention limits performance to 3 GB/s
+-  **Shared memory**: Tree reduction eliminates atomic contention → 126× speedup
+-  **Warp shuffle**: Lock-free warp-level primitives avoid shared memory entirely → 207× speedup
+-  **Interview insight**: This progression demonstrates the GPU memory hierarchy in action
 
 # View generated plots and summary
+
 # - vec_add_performance.png: Bandwidth and timing charts
+
 # - gemm_performance.png: GFLOP/s and timing charts
+
 # - gemm_scaling.png: Performance scaling analysis
+
 # - summary.md: Performance summary table
+
 ```
 
 ---
@@ -317,3 +364,4 @@ The project includes Python scripts for comprehensive performance analysis:
 -  Fused operators (Conv+ReLU, GEMM+Bias+Activation)
 -  Add PyTorch custom ops integration
 -  Triton kernel implementations for ergonomic comparison
+```
