@@ -299,28 +299,21 @@ The project includes Python scripts for comprehensive performance analysis:
 -  `python/compare_gemm.py` - Compare naive vs tiled implementations
 -  Speedup calculations and visualizations
 
-## Next Steps
+## Completed Features
 
--  ✅ ~~Create Python scripts for performance visualization~~
--  Add naive GEMM implementation for comparison
--  Parameter sweep automation (tile sizes, block sizes)
--  Integrate Nsight Compute for advanced profiling
--  Benchmark against cuBLAS/cuDNN baselines
--  Add PyTorch custom ops for GEMM benchmarking
--  Extend to WMMA/Tensor Core kernels (FP16/FP8)
--  Integrate Triton versions for ergonomic comparison
--  All kernels pass correctness tests against CPU reference
--  Performance benchmarks show expected speedups
+-  ✅ Vector addition, GEMM (naive/tiled), reduction (3 variants), softmax, conv2d kernels
+-  ✅ Mixed precision FP16/FP32 implementations
+-  ✅ Tensor Core WMMA kernel (10× FP32 speedup)
+-  ✅ Python benchmarking framework with automated CSV generation
+-  ✅ Performance visualization scripts (bandwidth, GFLOP/s, speedup comparisons)
+-  ✅ Comprehensive README with interview-focused analysis
 
-## Next Steps
+## Future Enhancements
 
--  Create Python scripts for performance visualization
--  Add parameter sweep automation (tile sizes, block sizes)
--  Integrate Nsight Compute for advanced profiling
--  Benchmark against cuBLAS/cuDNN baselines
--  Add PyTorch custom ops for GEMM benchmarking
--  Extend to WMMA/Tensor Core kernels (FP16/FP8)
--  Integrate Triton versions for ergonomic comparison
--  Extend to WMMA/Tensor Core kernels (FP16/FP8)
--  Integrate Triton versions for ergonomic comparison
--  Automate parameter sweeps and performance reports
+-  Parameter sweep automation (tile sizes: 8×8, 16×16, 32×32, 64×64)
+-  Integrate Nsight Compute for roofline analysis and bottleneck identification
+-  Benchmark against cuBLAS/cuDNN baselines for production comparison
+-  INT8 quantization kernels for maximum inference throughput
+-  Fused operators (Conv+ReLU, GEMM+Bias+Activation)
+-  Add PyTorch custom ops integration
+-  Triton kernel implementations for ergonomic comparison
