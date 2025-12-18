@@ -46,63 +46,107 @@ def plot_vec_add_bandwidth(csv_file, output_dir):
 
 
 def plot_gemm_performance(csv_file, output_dir):
-    """Plot GEMM performance vs size."""
+    """Plot GEMM performance comparing naive vs tiled."""
     df = pd.read_csv(csv_file)
+    
+    # Separate naive and tiled results
+    naive_df = df[df['variant'] == 'naive'].copy()
+    tiled_df = df[df['variant'] == 'tiled'].copy()
     
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
     
-    # GFLOP/s plot
-    ax1.plot(df['size'], df['gflops'], 'o-', linewidth=2, markersize=8, color='green')
+    # GFLOP/s comparison
+    if not naive_df.empty:
+        ax1.plot(naive_df['size'], naive_df['gflops'], 'o-', linewidth=2, markersize=8, 
+                label='Naive', color='coral')
+    if not tiled_df.empty:
+        ax1.plot(tiled_df['size'], tiled_df['gflops'], 's-', linewidth=2, markersize=8, 
+                label='Tiled (16×16)', color='green')
+    
     ax1.set_xlabel('Matrix Size (N×N)')
     ax1.set_ylabel('Performance (GFLOP/s)')
-    ax1.set_title('GEMM (Tiled): Compute Performance')
+    ax1.set_title('GEMM: Naive vs Tiled Performance')
     ax1.grid(True, alpha=0.3)
     ax1.set_xscale('log', base=2)
+    ax1.legend()
     
-    # Time plot (log scale)
-    ax2.plot(df['size'], df['time_ms'], 's-', linewidth=2, markersize=8, color='purple')
-    ax2.set_xlabel('Matrix Size (N×N)')
-    ax2.set_ylabel('Execution Time (ms)')
-    ax2.set_title('GEMM (Tiled): Execution Time')
-    ax2.set_yscale('log')
-    ax2.set_xscale('log', base=2)
-    ax2.grid(True, alpha=0.3)
+    # Speedup plot
+    if not naive_df.empty and not tiled_df.empty:
+        # Merge on size to calculate speedup
+        merged = naive_df.merge(tiled_df, on='size', suffixes=('_naive', '_tiled'))
+        speedup = merged['time_ms_naive'] / merged['time_ms_tiled']
+        
+        ax2.plot(merged['size'], speedup, 'd-', linewidth=2, markersize=8, color='purple')
+        ax2.axhline(y=1.0, color='red', linestyle='--', alpha=0.7, label='No speedup')
+        ax2.set_xlabel('Matrix Size (N×N)')
+        ax2.set_ylabel('Speedup (Naive/Tiled)')
+        ax2.set_title('GEMM: Tiled Speedup Over Naive')
+        ax2.set_xscale('log', base=2)
+        ax2.grid(True, alpha=0.3)
+        ax2.legend()
+        
+        # Annotate speedup values
+        for _, row in merged.iterrows():
+            sp = row['time_ms_naive'] / row['time_ms_tiled']
+            ax2.annotate(f"{sp:.2f}×", 
+                       xy=(row['size'], sp),
+                       xytext=(0, 10), textcoords='offset points',
+                       ha='center', fontsize=8)
     
     plt.tight_layout()
-    output_file = output_dir / 'gemm_performance.png'
+    output_file = output_dir / 'gemm_naive_vs_tiled.png'
     plt.savefig(output_file, dpi=150, bbox_inches='tight')
     print(f"Saved: {output_file}")
     plt.close()
 
 
-def plot_gemm_scaling(csv_file, output_dir):
-    """Plot GEMM scaling efficiency."""
+def plot_reduction_performance(csv_file, output_dir):
+    """Plot reduction optimization progression."""
     df = pd.read_csv(csv_file)
     
-    # Calculate FLOPs and efficiency
-    df['total_flops'] = 2 * df['size']**3
-    df['measured_flops'] = df['gflops'] * 1e9 * (df['time_ms'] / 1000)
-    df['efficiency'] = (df['measured_flops'] / df['total_flops']) * 100
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
     
-    fig, ax = plt.subplots(figsize=(10, 6))
+    # Bandwidth comparison
+    variants = df['variant'].tolist()
+    bandwidths = df['bandwidth_gbs'].tolist()
+    colors = ['coral', 'steelblue', 'green']
     
-    ax.plot(df['size'], df['gflops'], 'o-', linewidth=2, markersize=8, label='Achieved')
-    ax.set_xlabel('Matrix Size (N×N)')
-    ax.set_ylabel('Performance (GFLOP/s)')
-    ax.set_title('GEMM Performance Scaling')
-    ax.set_xscale('log', base=2)
-    ax.grid(True, alpha=0.3)
-    ax.legend()
+    bars = ax1.bar(range(len(variants)), bandwidths, color=colors, alpha=0.7, edgecolor='black')
+    ax1.set_xticks(range(len(variants)))
+    ax1.set_xticklabels(['Atomic\n(Baseline)', 'Shared Memory\n(Tree Reduction)', 
+                         'Warp Shuffle\n(Optimized)'])
+    ax1.set_ylabel('Bandwidth (GB/s)')
+    ax1.set_title('Reduction: Optimization Progression')
+    ax1.grid(True, alpha=0.3, axis='y')
     
-    # Add annotations
-    for _, row in df.iterrows():
-        ax.annotate(f"{row['gflops']:.0f}", 
-                   xy=(row['size'], row['gflops']),
-                   xytext=(0, 10), textcoords='offset points',
-                   ha='center', fontsize=8)
+    # Add value labels on bars
+    for bar, bw in zip(bars, bandwidths):
+        height = bar.get_height()
+        ax1.text(bar.get_x() + bar.get_width()/2., height,
+                f'{bw:.1f} GB/s',
+                ha='center', va='bottom', fontsize=10, fontweight='bold')
+    
+    # Speedup comparison (relative to atomic)
+    baseline_bw = df[df['variant'] == 'atomic']['bandwidth_gbs'].values[0]
+    speedups = df['bandwidth_gbs'] / baseline_bw
+    
+    bars2 = ax2.bar(range(len(variants)), speedups, color=colors, alpha=0.7, edgecolor='black')
+    ax2.set_xticks(range(len(variants)))
+    ax2.set_xticklabels(['Atomic', 'Shared Memory', 'Warp Shuffle'])
+    ax2.set_ylabel('Speedup over Atomic')
+    ax2.set_title('Reduction: Speedup Analysis')
+    ax2.grid(True, alpha=0.3, axis='y')
+    ax2.axhline(y=1.0, color='red', linestyle='--', alpha=0.5)
+    
+    # Add speedup labels
+    for bar, sp in zip(bars2, speedups):
+        height = bar.get_height()
+        ax2.text(bar.get_x() + bar.get_width()/2., height,
+                f'{sp:.0f}×',
+                ha='center', va='bottom', fontsize=11, fontweight='bold')
     
     plt.tight_layout()
-    output_file = output_dir / 'gemm_scaling.png'
+    output_file = output_dir / 'reduction_optimization.png'
     plt.savefig(output_file, dpi=150, bbox_inches='tight')
     print(f"Saved: {output_file}")
     plt.close()
@@ -112,6 +156,7 @@ def create_summary_table(results_dir, output_dir):
     """Create a summary table of all results."""
     vec_add_file = results_dir / 'vec_add_results.csv'
     gemm_file = results_dir / 'gemm_results.csv'
+    reduction_file = results_dir / 'reduction_results.csv'
     
     summary_lines = []
     summary_lines.append("# GPU Kernel Performance Summary\n")
@@ -131,12 +176,44 @@ def create_summary_table(results_dir, output_dir):
     
     if gemm_file.exists():
         df = pd.read_csv(gemm_file)
-        summary_lines.append(f"\n| Size | Time (ms) | Performance (GFLOP/s) | Status |\n")
-        summary_lines.append(f"|------|-----------|----------------------|--------|\n")
+        naive_df = df[df['variant'] == 'naive']
+        tiled_df = df[df['variant'] == 'tiled']
+        
+        summary_lines.append(f"\n| Size | Variant | Time (ms) | Performance (GFLOP/s) | Status |\n")
+        summary_lines.append(f"|------|---------|-----------|----------------------|--------|\n")
+        
+        # Interleave naive and tiled for same size
+        for size in sorted(df['size'].unique()):
+            naive_row = naive_df[naive_df['size'] == size]
+            tiled_row = tiled_df[tiled_df['size'] == size]
+            
+            if not naive_row.empty:
+                row = naive_row.iloc[0]
+                summary_lines.append(
+                    f"| {size}×{size} | Naive | {row['time_ms']:.3f} | "
+                    f"{row['gflops']:.2f} | {row['status']} |\n"
+                )
+            if not tiled_row.empty:
+                row = tiled_row.iloc[0]
+                summary_lines.append(
+                    f"| {size}×{size} | Tiled | {row['time_ms']:.3f} | "
+                    f"{row['gflops']:.2f} | {row['status']} |\n"
+                )
+    
+    summary_lines.append(f"\n## Parallel Reduction (10M elements)\n")
+    
+    if reduction_file.exists():
+        df = pd.read_csv(reduction_file)
+        baseline_bw = df[df['variant'] == 'atomic']['bandwidth_gbs'].values[0]
+        
+        summary_lines.append(f"\n| Variant | Time (ms) | Bandwidth (GB/s) | Speedup | Status |\n")
+        summary_lines.append(f"|---------|-----------|------------------|---------|--------|\n")
         for _, row in df.iterrows():
+            speedup = row['bandwidth_gbs'] / baseline_bw
+            variant_name = row['variant'].replace('_', ' ').title()
             summary_lines.append(
-                f"| {row['size']}×{row['size']} | {row['time_ms']:.3f} | "
-                f"{row['gflops']:.2f} | {row['status']} |\n"
+                f"| {variant_name} | {row['time_ms']:.3f} | "
+                f"{row['bandwidth_gbs']:.2f} | {speedup:.0f}× | {row['status']} |\n"
             )
     
     output_file = output_dir / 'summary.md'
@@ -170,7 +247,11 @@ def main():
     gemm_csv = results_dir / 'gemm_results.csv'
     if gemm_csv.exists():
         plot_gemm_performance(gemm_csv, results_dir)
-        plot_gemm_scaling(gemm_csv, results_dir)
+    
+    # Plot reduction
+    reduction_csv = results_dir / 'reduction_results.csv'
+    if reduction_csv.exists():
+        plot_reduction_performance(reduction_csv, results_dir)
     
     # Create summary
     create_summary_table(results_dir, results_dir)

@@ -222,11 +222,11 @@ The project includes Python scripts for comprehensive performance analysis:
 
 **Visualization:**
 
--  `python/plot_performance.py` - Generates performance charts
-   -  Bandwidth vs problem size for vector operations
-   -  GFLOP/s vs matrix size for GEMM
-   -  Performance scaling analysis
-   -  Markdown summary tables
+-  `python/plot_performance.py` - Generates comprehensive performance visualizations:
+   -  **vec_add_performance.png**: Memory bandwidth scaling across problem sizes
+   -  **gemm_naive_vs_tiled.png**: Side-by-side comparison showing where tiling helps (256-1024) vs where it hurts (2048-4096), with speedup annotations demonstrating the "optimizations aren't always better" principle
+   -  **reduction_optimization.png**: Bar charts visualizing the 207× speedup progression (atomic → shared memory → warp shuffle) with bandwidth and speedup metrics
+   -  **summary.md**: Auto-generated markdown tables with all benchmark results organized by kernel type
 
 **Analysis:**
 
