@@ -10,12 +10,12 @@ This project is designed to build intuition for GPU performance tuning—coverin
 This lab implements and benchmarks several fundamental GPU kernels:
 
 -  **Vector Addition (vec_add)** – baseline for memory coalescing and grid-stride loops
--  **Tiled Matrix Multiplication (GEMM)** – explores shared memory, tiling strategies, and performance scaling
+-  **Matrix Multiplication (GEMM)** – FP32 and **FP16 mixed precision** with tiling strategies and performance scaling
 -  **Parallel Reduction** – demonstrates atomic operations, shared memory reduction, and warp shuffle optimizations
 -  **Softmax** – demonstrates block-level reductions and numerical stability
 -  **Convolution (conv2d)** – applies tiling and data reuse for 2D image processing
 
-Each kernel is validated against a CPU reference implementation and profiled using **NVIDIA Nsight Compute**.
+Each kernel is validated against a CPU reference implementation and includes **TensorRT-relevant optimizations** (mixed precision, memory efficiency).
 
 ---
 
@@ -28,8 +28,12 @@ Each kernel is validated against a CPU reference implementation and profiled usi
    -  Grid-stride loops for vector operations
    -  Progressive reduction optimizations (atomic → shared memory → warp shuffle)
    -  Blocked memory tiling for matrix multiplication
+   -  **Mixed precision FP16/FP32** (TensorRT-style inference optimization)
    -  Warp-level reductions for softmax
    -  Tiled convolution with halo loading
+-  **TensorRT-relevant features**:
+   -  FP16 inference kernels with 50% memory footprint reduction
+   -  Performance comparison for precision/accuracy trade-offs
 -  **Python environment** ready for analysis and visualization
 -  **Optional**: Nsight Compute integration for advanced profiling
 
@@ -179,6 +183,37 @@ Each test outputs:
 - **Tiled implementation**: O(K/TILE_SIZE) global memory accesses with shared memory reuse
 - **The Paradox**: Reducing memory traffic doesn't guarantee speedup if you sacrifice occupancy
 - **Real-world solution**: cuBLAS uses multiple kernels with different tile sizes (8×8, 16×16, 32×32, 64×64) selected based on matrix dimensions and GPU architecture
+
+### Mixed Precision GEMM (FP16 vs FP32) - TensorRT Focus
+
+**1024×1024 Matrix Comparison:**
+
+| Precision | Variant | Time (ms) | Performance (GFLOP/s) | Speedup | Status |
+|-----------|---------|-----------|----------------------|---------|--------|
+| FP32      | Naive   | 1.304     | 1646.40              | 1.00×   | PASSED |
+| FP32      | Tiled   | 0.546     | 3935.54              | 2.39×   | PASSED |
+| FP16      | Naive   | 30.159    | 71.21                | 0.04×   | PASSED |
+| FP16      | Tiled   | 0.715     | 3002.77              | 1.82×   | PASSED |
+
+**TensorRT Analysis - Why FP16 Matters:**
+
+1. **Memory Footprint**: FP16 uses 50% less memory (critical for large batch inference)
+2. **Bandwidth Bound Operations**: 2× bandwidth improvement for memory-intensive layers
+3. **Tensor Core Enablement**: FP16 required for Tensor Core acceleration (not shown here - requires WMMA)
+4. **Inference Latency**: Lower memory transfer time reduces end-to-end latency
+5. **Batch Size**: Enables 2× larger batch sizes within same GPU memory budget
+
+**Why FP16 Naive is Slower Here:**
+- Conversion overhead: `__half2float()` and `__float2half()` in inner loop
+- No Tensor Core usage (requires WMMA/MMA APIs)
+- This kernel demonstrates **precision trade-offs**, not Tensor Core speedup
+- Real TensorRT uses Tensor Cores for 8-20× FP16 speedup over FP32
+
+**TensorRT Interview Insight:**
+- FP16 benefit is **memory + Tensor Cores**, not just arithmetic
+- Must weigh accuracy loss vs inference throughput
+- Production TensorRT: FP16 for most layers, FP32 for sensitive ops (loss, normalization)
+- Quantization awareness: FP16 → INT8 pipeline for maximum performance
 
 ### Parallel Reduction (10M elements)
 

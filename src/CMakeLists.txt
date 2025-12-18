@@ -2,6 +2,7 @@
 add_library(kernels STATIC
     vec_add.cu
     gemm.cu
+    gemm_fp16.cu
     softmax.cu
     conv2d.cu
     reduction.cu
